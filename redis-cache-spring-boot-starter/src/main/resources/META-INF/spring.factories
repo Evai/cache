@@ -1,0 +1,3 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+  com.heimdall.redis.cache.spring.boot.starter.RedisCacheAutoConfiguration,\
+  com.heimdall.redis.cache.spring.boot.starter.RedisTemplateConfig

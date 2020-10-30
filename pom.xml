@@ -8,9 +8,12 @@
     <artifactId>cache</artifactId>
     <version>1.0.0-SNAPSHOT</version>
 
+    <packaging>pom</packaging>
+
     <modules>
         <module>redis-cache-core</module>
         <module>redis-cache-spring-boot-starter</module>
+        <module>redis-cache-spring-boot-demo</module>
     </modules>
 
     <properties>
@@ -19,12 +22,11 @@
         <java.version>1.8</java.version>
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
-        <commons-net.version>3.1</commons-net.version>
         <apache.commons-lang3.version>3.9</apache.commons-lang3.version>
         <redisson.version>3.10.5</redisson.version>
         <mybatis-plus.version>3.1.0</mybatis-plus.version>
-        <guava.version>28.0-jre</guava.version>
         <springboot.version>2.3.3.RELEASE</springboot.version>
+        <guava.version>29.0-jre</guava.version>
     </properties>
 
     <dependencyManagement>
