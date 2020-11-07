@@ -1,26 +1,23 @@
 package com.heimdall.redis.cache.spring.boot.starter;
 
 import com.fasterxml.jackson.databind.JavaType;
-import com.heimdall.redis.cache.core.annotation.CacheAble;
-import com.heimdall.redis.cache.core.CacheConstant;
+import com.heimdall.redis.cache.core.IKeyGenerator;
 import com.heimdall.redis.cache.core.JacksonSerializer;
+import com.heimdall.redis.cache.core.annotation.CacheAble;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.Signature;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.core.annotation.Order;
-import org.springframework.expression.EvaluationContext;
-import org.springframework.expression.spel.standard.SpelExpressionParser;
-import org.springframework.expression.spel.support.StandardEvaluationContext;
-import org.springframework.util.StringUtils;
 
 import java.lang.reflect.Type;
+import java.util.Arrays;
 
 /**
  * @author crh
  * @date 2019/6/19
- * @description 通用缓存切面
+ * @description 缓存切面
  */
 @Aspect
 @Order(50)
@@ -29,28 +26,40 @@ public class CacheAbleAspect {
     private final CacheComponent cacheComponent;
     private final JacksonSerializer jacksonSerializer;
     private final RedisCacheProperties redisCacheProperties;
+    private final IKeyGenerator keyGenerator;
 
-    public CacheAbleAspect(CacheComponent cacheComponent, JacksonSerializer jacksonSerializer, RedisCacheProperties redisCacheProperties) {
+    public CacheAbleAspect(CacheComponent cacheComponent, JacksonSerializer jacksonSerializer, RedisCacheProperties redisCacheProperties, IKeyGenerator keyGenerator) {
         this.cacheComponent = cacheComponent;
         this.jacksonSerializer = jacksonSerializer;
         this.redisCacheProperties = redisCacheProperties;
+        this.keyGenerator = keyGenerator;
     }
 
     @Around(value = "@annotation(cacheAble)")
     public Object around(ProceedingJoinPoint pjp, CacheAble cacheAble) throws Throwable {
         int asyncSeconds = cacheAble.asyncSeconds();
         int[] expired = cacheAble.expired();
-
-        Signature signature = pjp.getSignature();
-        Object[] args = pjp.getArgs();
-        MethodSignature methodSignature = (MethodSignature) signature;
-
         int expiredSeconds = CacheKeyUtils.randomExpired(expired);
+
+        Object[] args = pjp.getArgs();
+        Signature signature = pjp.getSignature();
+        MethodSignature methodSignature = (MethodSignature) signature;
 
         // 方法返回类型
         Class returnType = methodSignature.getReturnType();
-        Type[] types = BeanUtils.getMethodGenericClass(methodSignature);
 
+        String key = CacheKeyUtils.generateKey(cacheAble.key(), keyGenerator, pjp.getTarget(), methodSignature, args);
+
+        String keyPrefix = CacheKeyUtils.getKeyPrefix(redisCacheProperties.getKeyPrefix());
+
+        boolean match = Arrays.asList(returnType.getInterfaces()).contains(IEntity.class);
+
+        if (match) {
+            CacheKey cacheKey = assembleCacheKey(keyPrefix, key, args, methodSignature);
+            return cacheComponent.getEntityCache(cacheKey, expiredSeconds, asyncSeconds, returnType, cacheAble, () -> proceed(pjp));
+        }
+
+        Type[] types = BeanUtils.getMethodGenericClass(methodSignature);
         JavaType javaType;
         if (types.length > 0) {
             Class[] classes = BeanUtils.toArray(types, Class.class);
@@ -58,46 +67,35 @@ public class CacheAbleAspect {
         } else {
             javaType = jacksonSerializer.getJavaType(returnType);
         }
-
-        String[] parameterNames = methodSignature.getParameterNames();
-
-        SpelExpressionParser spelExpressionParser = new SpelExpressionParser();
-        EvaluationContext context = new StandardEvaluationContext();
-
-        for (int i = 0; i < parameterNames.length; i++) {
-            context.setVariable(parameterNames[i], args[i]);
-        }
-
-        String key = spelExpressionParser.parseExpression(cacheAble.key()).getValue(context, String.class);
-
-        String keyPrefix = assembleKeyPrefix(cacheAble, pjp, methodSignature);
-
         return cacheComponent.getCache(keyPrefix + key, expiredSeconds, asyncSeconds, javaType, () -> this.proceed(pjp));
     }
 
-    private String assembleKeyPrefix(CacheAble cacheAble, ProceedingJoinPoint pjp, MethodSignature methodSignature) {
-        String keyPrefix = "";
+    /**
+     * 组合为最终的缓存key
+     *
+     * @param args
+     * @param keyPrefix
+     * @param key
+     * @param methodSignature
+     * @return
+     */
+    public CacheKey assembleCacheKey(String keyPrefix, String key, Object[] args, MethodSignature methodSignature) {
+        String indexKey = keyPrefix + key;
+        String primaryKey = null;
+        Class returnType = methodSignature.getReturnType();
+        String className = returnType.getSimpleName();
 
-        String keyNamePrefix = redisCacheProperties.getKeyPrefix();
-        String keyNameSuffix = redisCacheProperties.getKeySuffix();
+        if (args.length == 1) {
+            Object value = args[0];
+            String[] parameterNames = methodSignature.getParameterNames();
+            String parameterName = parameterNames[0];
+            //如果请求参数只有一个, 并且是Long类型且参数名为配置的主键名, 设置主键key
+            if (value instanceof Long && redisCacheProperties.getPrimaryKey().equals(parameterName)) {
+                primaryKey = CacheKeyUtils.assemblePrimaryKey(redisCacheProperties, className, value);
+            }
+        }
 
-        if (StringUtils.hasText(cacheAble.keyPrefix())) {
-            keyPrefix += cacheAble.keyPrefix() + CacheConstant.COLON;
-        } else if (StringUtils.hasText(keyNamePrefix)) {
-            keyPrefix += keyNamePrefix + CacheConstant.COLON;
-        }
-        if (cacheAble.addKeyClass()) {
-            keyPrefix += pjp.getTarget().getClass().getSimpleName() + CacheConstant.COLON;
-        }
-        if (cacheAble.addKeyMethod()) {
-            keyPrefix += methodSignature.getName() + CacheConstant.COLON;
-        }
-        if (StringUtils.hasText(cacheAble.keySuffix())) {
-            keyPrefix += cacheAble.keySuffix() + CacheConstant.COLON;
-        } else if (StringUtils.hasText(keyNameSuffix)) {
-            keyPrefix += keyNameSuffix + CacheConstant.COLON;
-        }
-        return keyPrefix;
+        return new CacheKey(keyPrefix, primaryKey, indexKey);
     }
 
     /**

@@ -14,10 +14,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class User implements IEntity {
 
+    private Long id;
+
     private String name;
 
-    @Override
-    public Long getId() {
-        return 1L;
-    }
 }

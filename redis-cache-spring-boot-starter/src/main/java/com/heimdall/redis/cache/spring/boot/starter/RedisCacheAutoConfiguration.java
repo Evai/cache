@@ -30,27 +30,26 @@ import java.util.concurrent.TimeUnit;
 public class RedisCacheAutoConfiguration {
 
     @Resource
-    private  RedisTemplate<String, Object> redisTemplate;
+    private RedisTemplate<String, Object> redisTemplate;
 
     @Resource
-    private  RedissonClient redissonClient;
+    private RedissonClient redissonClient;
 
     @Bean
     @ConditionalOnMissingBean
     public RedisCacheProperties redisCacheProperties() {
-        RedisCacheProperties redisCacheProperties = new RedisCacheProperties();
-        redisCacheProperties.setKeyPrefix(CacheConstant.CACHE_PREFIX);
-        return redisCacheProperties;
+        return new RedisCacheProperties();
     }
 
     @Bean
+    @ConditionalOnMissingBean
     public CacheLock cacheLock() {
         return new RedisLock(redissonClient, redisTemplate);
     }
 
     @Bean
     @ConditionalOnMissingBean
-    public ExecutorService cacheExecutor(RedisCacheProperties redisCacheProperties) {
+    public ExecutorService cacheExecutor() {
         return ThreadPoolUtils.newThreadPoolExecutor("redis-cache-executor", ThreadPoolUtils.CORE_POOL_SIZE, ThreadPoolUtils.CORE_POOL_SIZE * 2, 60L, TimeUnit.SECONDS, 500, new ThreadPoolExecutor.AbortPolicy());
     }
 
@@ -72,27 +71,34 @@ public class RedisCacheAutoConfiguration {
     }
 
     @Bean
-    public IRedisClient redisClient() {
-        return new RedisClient(redisTemplate, jsonSerializer());
+    public IRedisClient redisClient(JacksonSerializer jacksonSerializer) {
+        return new RedisClient(redisTemplate, jacksonSerializer);
     }
 
     @Bean
-    public IRedisClient redisService() {
-        return new RedisClient(redisTemplate, jsonSerializer());
-    }
-
-    public CacheComponent cacheComponent() {
-        return new CacheComponent(redisClient(), redisCacheProperties(), redisTemplate,cacheLock(),jacksonSerializer(), cacheExecutor(redisCacheProperties()));
+    public IRedisClient redisService(JacksonSerializer jacksonSerializer) {
+        return new RedisClient(redisTemplate, jacksonSerializer);
     }
 
     @Bean
-    public CacheAbleAspect cacheAbleAspect() {
-        return new CacheAbleAspect(cacheComponent(), jacksonSerializer(), redisCacheProperties());
+    public CacheComponent cacheComponent(IRedisClient redisClient, JacksonSerializer jacksonSerializer, RedisCacheProperties redisCacheProperties, CacheLock cacheLock, ExecutorService cacheExecutor) {
+        return new CacheComponent(redisClient, redisCacheProperties, redisTemplate, cacheLock, jacksonSerializer, cacheExecutor);
     }
 
     @Bean
-    public CacheAbleEntityAspect cacheAbleEntityAspect() {
-        return new CacheAbleEntityAspect(cacheComponent(), redisCacheProperties());
+    public CacheAbleAspect cacheAbleAspect(CacheComponent cacheComponent, JacksonSerializer jacksonSerializer, RedisCacheProperties redisCacheProperties, IKeyGenerator keyGenerator) {
+        return new CacheAbleAspect(cacheComponent, jacksonSerializer, redisCacheProperties, keyGenerator);
+    }
+
+    @Bean
+    public CachePutAspect cachePutAspect(CacheComponent cacheComponent, JacksonSerializer jacksonSerializer, RedisCacheProperties redisCacheProperties, IKeyGenerator keyGenerator) {
+        return new CachePutAspect(cacheComponent, jacksonSerializer, redisCacheProperties, keyGenerator);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public IKeyGenerator keyGenerator() {
+        return new DefaultKeyGenerator();
     }
 
 }

@@ -3,6 +3,7 @@ package com.heimdall.redis.cache.core;
 import java.util.Collection;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * @author crh
@@ -28,7 +29,7 @@ public interface IRedisClient {
      *
      * @param pattern "*keyName*"
      */
-    Set<String> keys(String pattern);
+    void keys(String pattern, Consumer<Set<String>> consumer);
 
     ScanCursor<String> scan(Long cursorId, String pattern);
 
@@ -38,6 +39,8 @@ public interface IRedisClient {
      * @param keys
      */
     Long unlink(Collection<String> keys);
+
+    boolean unlink(String key);
 
     boolean exists(String key);
 

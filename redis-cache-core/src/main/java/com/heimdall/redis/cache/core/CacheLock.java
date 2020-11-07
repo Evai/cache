@@ -1,8 +1,8 @@
 package com.heimdall.redis.cache.core;
 
 import com.heimdall.redis.cache.core.exception.GetLockFailedException;
-import org.redisson.api.RLock;
 
+import java.util.concurrent.locks.Lock;
 import java.util.function.Supplier;
 
 /**
@@ -12,7 +12,7 @@ import java.util.function.Supplier;
  */
 public interface CacheLock {
 
-    RLock getLock(String key);
+    Lock getLock(String key);
     /**
      * 获取锁
      *
@@ -20,7 +20,7 @@ public interface CacheLock {
      * @param expired
      * @return
      */
-    boolean tryLock(RLock lock, long expired);
+    boolean tryLock(Lock lock, long expired);
 
     /**
      * 加锁并自动释放锁，尝试等待时间

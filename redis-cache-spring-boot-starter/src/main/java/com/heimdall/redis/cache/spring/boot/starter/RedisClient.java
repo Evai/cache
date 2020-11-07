@@ -1,15 +1,18 @@
-package com.heimdall.redis.cache.core;
+package com.heimdall.redis.cache.spring.boot.starter;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.heimdall.redis.cache.core.IJsonSerializer;
+import com.heimdall.redis.cache.core.IRedisClient;
+import com.heimdall.redis.cache.core.ScanCursor;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.*;
 import org.springframework.util.CollectionUtils;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * @author crh
@@ -61,22 +64,21 @@ public class RedisClient implements IRedisClient {
     }
 
     @Override
-    public Set<String> keys(String pattern) {
+    public void keys(String pattern, Consumer<Set<String>> consumer) {
         Set<String> sets = new HashSet<>();
         long cursorId = 0L;
         for (; ; ) {
-            ScanCursor<String> scanCursor = this.scan(cursorId, pattern);
+            com.heimdall.redis.cache.core.ScanCursor<String> scanCursor = this.scan(cursorId, pattern);
             if (scanCursor.getCursorId() == 0L || CollectionUtils.isEmpty(scanCursor.getItems())) {
                 break;
             }
-            sets.addAll(scanCursor.getItems());
+            consumer.accept(sets);
             cursorId = scanCursor.getCursorId();
         }
-        return sets;
     }
 
     @Override
-    public ScanCursor<String> scan(Long cursorId, String pattern) {
+    public com.heimdall.redis.cache.core.ScanCursor<String> scan(Long cursorId, String pattern) {
         Cursor<byte[]> cursor = redisTemplate.execute((RedisCallback<Cursor<byte[]>>) redisConnection -> redisConnection.scan(
                 ScanOptions.scanOptions()
                         .count(cursorId == null ? 0L : cursorId)
@@ -97,6 +99,11 @@ public class RedisClient implements IRedisClient {
     @Override
     public Long unlink(Collection<String> keys) {
         return redisTemplate.unlink(keys);
+    }
+
+    @Override
+    public boolean unlink(String key) {
+        return Boolean.TRUE.equals(redisTemplate.unlink(key));
     }
 
     @Override

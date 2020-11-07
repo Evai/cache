@@ -45,11 +45,6 @@ public interface CacheConstant {
     String WRITE_LOCK = "writeLock:";
 
     /**
-     * 所有缓存前缀
-     */
-    String CACHE_PREFIX = "Heimdall";
-
-    /**
      * 主键字段名称
      */
     String PK = "id";

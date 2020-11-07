@@ -4,12 +4,11 @@ package com.heimdall.redis.cache.spring.boot.starter;
 import com.fasterxml.jackson.databind.JavaType;
 import com.google.common.collect.Lists;
 import com.heimdall.redis.cache.core.*;
-import com.heimdall.redis.cache.core.annotation.CacheAbleEntity;
+import com.heimdall.redis.cache.core.annotation.CacheAble;
 import com.heimdall.redis.cache.core.exception.GetLockFailedException;
-import com.heimdall.redis.cache.core.exception.IllegalParamException;
-import org.apache.commons.lang3.BooleanUtils;
+import com.heimdall.redis.cache.core.exception.IllegalEntityException;
+import com.heimdall.redis.cache.core.exception.IllegalEntityValueException;
 import org.apache.commons.lang3.StringUtils;
-import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.connection.ReturnType;
@@ -17,11 +16,11 @@ import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.util.CollectionUtils;
 
-import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -126,22 +125,17 @@ public class CacheComponent {
      * @param <T>
      * @return
      */
-    public <T> T getCache(String key, int seconds, int asyncSeconds, JavaType javaType, Supplier<T> supplier) {
+    <T> T getCache(String key, int seconds, int asyncSeconds, JavaType javaType, Supplier<T> supplier) {
         String value = (String) redisClient.get(key);
         // 缓存值不存在或已失效
         if (value == null) {
-            T result = supplier.get();
-            redisClient.set(key, this.beanToString(result), seconds);
-            return result;
+            return this.writeData(key, seconds, supplier);
         } else {
             // 如果到期时间 < 设置的到期时间，更新缓存数据，防止缓存穿透
             Long expired = redisTemplate.getExpire(key, TimeUnit.SECONDS);
             if (expired == null || expired < asyncSeconds) {
                 // 异步更新方法
-                Runnable runnable = () -> {
-                    T result = supplier.get();
-                    redisClient.set(key, this.beanToString(result), seconds);
-                };
+                Runnable runnable = () -> this.writeData(key, seconds, supplier);
                 asyncUpdateCache(key, runnable);
             }
             // 说明数据库没有该值，无需重复查询数据库
@@ -162,12 +156,12 @@ public class CacheComponent {
      * @param <T>
      * @return
      */
-    public <T> T getEntityCache(CacheKey cacheKey, int seconds, int asyncSeconds, Class<T> clazz, CacheAbleEntity cacheAbleEntity, Supplier<T> supplier) {
+    public <T> T getEntityCache(CacheKey cacheKey, int seconds, int asyncSeconds, Class<T> clazz, CacheAble cacheAble, Supplier<T> supplier) {
         // 通过索引key查询到主键key
         String primaryKey = (String) redisClient.get(cacheKey.getIndexKey());
         // 不存在或已失效
         if (primaryKey == null) {
-            return getEntityResult(cacheKey, seconds, cacheAbleEntity, supplier);
+            return getEntityResult(cacheKey, seconds, cacheAble, supplier);
         } else {
             // 说明数据库没有该值，无需重复查询数据库
             if (StringUtils.equals(primaryKey, CacheConstant.NULL)) {
@@ -178,7 +172,7 @@ public class CacheComponent {
             String entityJson = (String) redisClient.get(primaryKey);
             // 如果不存在，执行业务逻辑查询数据
             if (entityJson == null) {
-                return getEntityResult(cacheKey, seconds, cacheAbleEntity, supplier);
+                return getEntityResult(cacheKey, seconds, cacheAble, supplier);
             }
             // 如果到期时间 < 设置的到期时间，更新缓存数据，防止缓存穿透
             Long primaryKeyExpired = redisClient.getExpire(primaryKey, TimeUnit.SECONDS);
@@ -188,7 +182,7 @@ public class CacheComponent {
             }
             if (primaryKeyExpired == null || primaryKeyExpired < asyncSeconds) {
                 // 异步更新方法
-                Runnable runnable = () -> getEntityResult(cacheKey, seconds, cacheAbleEntity, supplier);
+                Runnable runnable = () -> getEntityResult(cacheKey, seconds, cacheAble, supplier);
                 asyncUpdateCache(primaryKey, runnable);
             }
 
@@ -225,7 +219,7 @@ public class CacheComponent {
         }
     }
 
-    private <T> T getEntityResult(CacheKey cacheKey, int seconds, CacheAbleEntity cacheAbleEntity, Supplier<T> supplier) {
+    private <T> T getEntityResult(CacheKey cacheKey, int seconds, CacheAble cacheAble, Supplier<T> supplier) {
         T result = supplier.get();
         String primaryKey = null;
         // 这里存索引key，值为主键key
@@ -237,16 +231,11 @@ public class CacheComponent {
         } else {
             Long id = ((IEntity) result).getId();
             if (id == null) {
-                throw new RuntimeException("result entity id must not be null, entity: " + result.toString());
+                throw new IllegalEntityValueException("result entity id must not be null, entity class name: " + result.getClass().getSimpleName());
             }
             String className = result.getClass().getSimpleName();
-            primaryKey = CacheKeyUtils.getKeyPrefix(cacheAbleEntity, redisCacheProperties.getKeyPrefix()) +
-                    CacheKeyUtils.getKeySuffix(cacheAbleEntity, redisCacheProperties.getKeySuffix()) +
-                    className +
-                    CacheConstant.COLON +
-                    CacheConstant.PK +
-                    CacheConstant.COLON +
-                    id;
+
+            primaryKey = CacheKeyUtils.assemblePrimaryKey(redisCacheProperties, className, id);
         }
 
         // 判断写锁是否存在，存在则不放入缓存，这里存的是实体类
@@ -262,54 +251,18 @@ public class CacheComponent {
         redisClient.set(key, CacheConstant.NULL, CacheConstant.SECOND_OF_10);
     }
 
-    /**
-     * 1.新增写锁
-     * 2.删除缓存
-     * 3.更新数据库
-     * 4.释放写锁
-     *
-     * @param cacheKey
-     * @param lockSeconds 加锁时间，单位秒
-     * @param supplier    更新持久层方法
-     * @param <T>
-     * @return
-     */
-    <T> T writeData(CacheKey cacheKey, long lockSeconds, Supplier<T> supplier) {
-        if (cacheKey.getPrimaryKey() == null) {
-            return supplier.get();
-        }
-        String primaryKey = cacheKey.getPrimaryKey();
-        String lockKey = getWriteLockKey(primaryKey);
-        Long lockNum = this.tryWriteLock(lockKey, lockSeconds);
-        log.info("write lock increment key: [{}], lockNum: [{}]", lockKey, lockNum);
-        try {
-            // 先删除之前的缓存
-            this.delete(cacheKey);
-            // 数据库增删改后的值
-            return supplier.get();
-        } finally {
-            lockNum = this.releaseWriteLock(lockKey);
-            log.info("write lock decrement key: [{}], lockNum: [{}]", lockKey, lockNum);
-        }
+    <T> T writeData(String key, int seconds, Supplier<T> supplier) {
+        T result = supplier.get();
+        redisClient.set(key, this.beanToString(result), seconds);
+        return result;
     }
 
-    <T> T insertAutoData(CacheKey cacheKey, long lockSeconds, Supplier<T> supplier) {
-        // 先执行插入逻辑后取到自增id
-        T result = supplier.get();
-        String primaryKey = cacheKey.getPrimaryKey();
-        if (primaryKey != null) {
-            String lockKey = getWriteLockKey(primaryKey);
-            Long lockNum = this.tryWriteLock(lockKey, lockSeconds);
-            log.info("write lock increment key: [{}], lockNum: [{}]", lockKey, lockNum);
-            // 先删除之前的缓存
-            try {
-                this.delete(cacheKey);
-            } finally {
-                lockNum = this.releaseWriteLock(lockKey);
-                log.info("write lock decrement key: [{}], lockNum: [{}]", lockKey, lockNum);
-            }
+    void evictData(String key, boolean isPattern) {
+        if (isPattern) {
+            redisClient.keys(key, redisClient::unlink);
+        } else {
+            redisClient.unlink(key);
         }
-        return result;
     }
 
     /**
@@ -340,7 +293,7 @@ public class CacheComponent {
         long cursorId = 0L;
         for (; ; ) {
             ScanCursor<String> scanCursor = redisClient.scan(cursorId, "*" + key + "*");
-            if (scanCursor.getCursorId() == 0L || CollectionUtils.isEmpty(scanCursor.getItems())) {
+            if (scanCursor == null || CollectionUtils.isEmpty(scanCursor.getItems())) {
                 break;
             }
             redisClient.unlink(scanCursor.getItems());

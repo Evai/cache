@@ -9,9 +9,22 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  */
 @ConfigurationProperties("com.heimdall.redis.cache")
 public class RedisCacheProperties {
+    /**
+     * 主键
+     */
+    private String primaryKey = "id";
+    /**
+     * 缓存key前缀
+     */
+    private String keyPrefix = "Heimdall";
 
-    private String keyPrefix;
-    private String keySuffix;
+    public String getPrimaryKey() {
+        return primaryKey;
+    }
+
+    public void setPrimaryKey(String primaryKey) {
+        this.primaryKey = primaryKey;
+    }
 
     public String getKeyPrefix() {
         return keyPrefix;
@@ -19,14 +32,6 @@ public class RedisCacheProperties {
 
     public void setKeyPrefix(String keyPrefix) {
         this.keyPrefix = keyPrefix;
-    }
-
-    public String getKeySuffix() {
-        return keySuffix;
-    }
-
-    public void setKeySuffix(String keySuffix) {
-        this.keySuffix = keySuffix;
     }
 
 }

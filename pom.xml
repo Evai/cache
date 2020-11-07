@@ -23,7 +23,7 @@
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
         <apache.commons-lang3.version>3.9</apache.commons-lang3.version>
-        <redisson.version>3.10.5</redisson.version>
+        <redisson.version>3.13.6</redisson.version>
         <mybatis-plus.version>3.1.0</mybatis-plus.version>
         <springboot.version>2.3.3.RELEASE</springboot.version>
         <guava.version>29.0-jre</guava.version>

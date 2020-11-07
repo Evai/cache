@@ -1,5 +1,7 @@
-package com.heimdall.redis.cache.core;
+package com.heimdall.redis.cache.spring.boot.starter;
 
+import com.heimdall.redis.cache.core.CacheConstant;
+import com.heimdall.redis.cache.core.CacheLock;
 import com.heimdall.redis.cache.core.exception.GetLockFailedException;
 import com.heimdall.redis.cache.core.util.ThreadPoolUtils;
 import org.redisson.api.RLock;
@@ -11,6 +13,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
 import java.util.function.Supplier;
 
 /**
@@ -32,14 +35,19 @@ public class RedisLock implements CacheLock {
     }
 
     @Override
-    public RLock getLock(String key) {
+    public Lock getLock(String key) {
         return redissonClient.getLock(key);
     }
 
     @Override
-    public boolean tryLock(RLock lock, long expired) {
+    public boolean tryLock(Lock lock, long expired) {
+        if (!(lock instanceof RLock)) {
+            return false;
+        }
+
+        RLock rLock = (RLock) lock;
         try {
-            return lock.tryLock(0, expired, TimeUnit.SECONDS);
+            return rLock.tryLock(0, expired, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("thread-{} interrupt", Thread.currentThread().getName());

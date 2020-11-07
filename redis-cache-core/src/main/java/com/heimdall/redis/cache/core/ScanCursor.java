@@ -8,9 +8,6 @@ public class ScanCursor<T> {
     private long cursorId;
     private Collection<T> items;
 
-    public ScanCursor() {
-    }
-
     public ScanCursor(long cursorId, Collection<T> items) {
         this.cursorId = cursorId;
         this.items = items;

@@ -2,13 +2,14 @@ package com.heimdall.redis.cache.spring.boot.starter;
 
 
 import com.heimdall.redis.cache.core.CacheConstant;
-import com.heimdall.redis.cache.core.KeyFormat;
-import com.heimdall.redis.cache.core.annotation.CacheAbleEntity;
-import com.heimdall.redis.cache.core.exception.IllegalGenericTypeException;
+import com.heimdall.redis.cache.core.IKeyGenerator;
+import com.heimdall.redis.cache.core.MethodParam;
 import org.apache.commons.lang3.RandomUtils;
-import org.apache.commons.lang3.StringUtils;
-
-import java.lang.reflect.ParameterizedType;
+import org.aspectj.lang.reflect.MethodSignature;
+import org.springframework.expression.EvaluationContext;
+import org.springframework.expression.spel.standard.SpelExpressionParser;
+import org.springframework.expression.spel.support.StandardEvaluationContext;
+import org.springframework.util.StringUtils;
 
 /**
  * @author crh
@@ -17,24 +18,30 @@ import java.lang.reflect.ParameterizedType;
  */
 public class CacheKeyUtils {
 
-    public static String getKeyPrefix(CacheAbleEntity cacheAbleEntity, String globalKeyPrefix) {
+    public static String generateKey(String key, IKeyGenerator keyGenerator, Object target, MethodSignature methodSignature, Object[] args) {
+        MethodParam[] methodParams = new MethodParam[args.length];
+        for (int i = 0; i < args.length; i++) {
+            methodParams[i] = new MethodParam(methodSignature.getParameterNames()[i], args[i]);
+        }
+        if (key.isEmpty()) {
+            key = keyGenerator.generate(target, methodSignature.getMethod(), methodParams);
+        } else {
+            SpelExpressionParser spelExpressionParser = new SpelExpressionParser();
+            EvaluationContext context = new StandardEvaluationContext();
+            for (MethodParam param : methodParams) {
+                context.setVariable(param.getName(), param.getValue());
+            }
+            key = spelExpressionParser.parseExpression(key).getValue(context, String.class);
+        }
+        return key;
+    }
+
+    public static String getKeyPrefix(String globalKeyPrefix) {
         String keyPrefix = "";
-        if (org.springframework.util.StringUtils.hasText(cacheAbleEntity.keyPrefix())) {
-            keyPrefix += cacheAbleEntity.keyPrefix() + CacheConstant.COLON;
-        } else if (org.springframework.util.StringUtils.hasText(globalKeyPrefix)) {
+        if (StringUtils.hasText(globalKeyPrefix)) {
             keyPrefix += globalKeyPrefix + CacheConstant.COLON;
         }
         return keyPrefix;
-    }
-
-    public static String getKeySuffix(CacheAbleEntity cacheAbleEntity, String globalKeySuffix) {
-        String keySuffix = "";
-        if (org.springframework.util.StringUtils.hasText(cacheAbleEntity.keySuffix())) {
-            keySuffix += cacheAbleEntity.keySuffix() + CacheConstant.COLON;
-        } else if (org.springframework.util.StringUtils.hasText(globalKeySuffix)) {
-            keySuffix += globalKeySuffix + CacheConstant.COLON;
-        }
-        return keySuffix;
     }
 
     /**
@@ -54,25 +61,13 @@ public class CacheKeyUtils {
         return RandomUtils.nextInt(30, 60);
     }
 
-    public static String assemblePrimaryKey(CacheAbleEntity cacheAbleEntity, RedisCacheProperties redisCacheProperties, String className, Object value) {
-        return CacheKeyUtils.getKeyPrefix(cacheAbleEntity, redisCacheProperties.getKeyPrefix()) +
-                CacheKeyUtils.getKeySuffix(cacheAbleEntity, redisCacheProperties.getKeySuffix()) +
+    public static String assemblePrimaryKey(RedisCacheProperties redisCacheProperties, String className, Object value) {
+        return CacheKeyUtils.getKeyPrefix(redisCacheProperties.getKeyPrefix()) +
                 className +
                 CacheConstant.COLON +
-                CacheConstant.PK +
+                redisCacheProperties.getPrimaryKey() +
                 CacheConstant.COLON +
                 value;
-    }
-
-    public Class getGenericType(Object obj, int index) {
-        try {
-            return (Class) ((ParameterizedType) obj
-                    .getClass()
-                    .getGenericSuperclass())
-                    .getActualTypeArguments()[index];
-        } catch (Exception e) {
-            throw new IllegalGenericTypeException("not found generic type");
-        }
     }
 
 }
